@@ -59,6 +59,12 @@ build_options = [
         'desc': 'dynamic loader',
         'func': check_libs(['dl'], check_statement('dlfcn.h', 'dlopen("", 0)'))
     }, {
+        'name': '--cplugins',
+        'desc': 'C plugins',
+        'deps': [ 'libdl' ],
+        'default': 'disable',
+        'func': check_true
+    }, {
         'name': 'dlopen',
         'desc': 'dlopen',
         'deps_any': [ 'libdl', 'os-win32', 'os-cygwin' ],
@@ -932,6 +938,9 @@ def configure(ctx):
 
     if ctx.dependency_satisfied('clang-database'):
         ctx.load('clang_compilation_database')
+
+    if ctx.dependency_satisfied('cplugins'):
+        ctx.env.LINKFLAGS += ['-Wl,-export-dynamic']
 
     ctx.store_dependencies_lists()
 
