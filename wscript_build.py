@@ -272,6 +272,7 @@ def build(ctx):
         ( "sub/osd_dummy.c",                     "dummy-osd" ),
         ( "sub/osd_libass.c",                    "libass-osd" ),
         ( "sub/sd_ass.c",                        "libass" ),
+        ( "sub/sd_cc.c" ),
         ( "sub/sd_lavc.c" ),
         ( "sub/sd_lavc_conv.c" ),
         ( "sub/sd_lavf_srt.c" ),

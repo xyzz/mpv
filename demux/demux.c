@@ -97,6 +97,9 @@ struct demux_stream {
     int bytes;            // total bytes of packets in buffer
     struct demux_packet *head;
     struct demux_packet *tail;
+
+    // specifically for closed aptions
+    int cc_offset;
 };
 
 static void add_stream_chapters(struct demuxer *demuxer);
@@ -265,6 +268,7 @@ struct sh_stream *new_sh_stream(demuxer_t *demuxer, enum stream_type type)
     }
 
     sh->ds->selected = demuxer->stream_autoselect;
+    sh->ds->cc_offset = -1;
 
     return sh;
 }
@@ -472,6 +476,29 @@ bool demuxer_stream_has_packets_queued(struct demuxer *d, struct sh_stream *stre
 bool demux_stream_eof(struct sh_stream *sh)
 {
     return !sh || sh->ds->eof;
+}
+
+void demuxer_feed_caption(struct sh_stream *stream, demux_packet_t *dp)
+{
+    struct demuxer *demux = stream->demuxer;
+    // Lazily create the streams. There are 4, because that's how A53 CCs work.
+    if (stream->ds->cc_offset < 0) {
+        int offset = demux->num_streams;
+        for (int n = 0; n < 4; n++) {
+            struct sh_stream *sh = new_sh_stream(demux, STREAM_SUB);
+            if (!sh)
+                return;
+            assert(sh->index == offset + n);
+            sh->codec = talloc_asprintf(sh, "cc%d", n);
+        }
+        stream->ds->cc_offset = offset;
+    }
+    for (int n = 0; n < 4; n++) {
+        struct sh_stream *sh = demux->streams[stream->ds->cc_offset + n];
+        if (demuxer_stream_is_selected(demux, sh))
+            demuxer_add_packet(demux, sh, demux_copy_packet(dp));
+    }
+    talloc_free(dp);
 }
 
 // ====================================================================

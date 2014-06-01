@@ -232,6 +232,8 @@ void free_demuxer(struct demuxer *demuxer);
 int demuxer_add_packet(demuxer_t *demuxer, struct sh_stream *stream,
                        demux_packet_t *dp);
 
+void demuxer_feed_caption(struct sh_stream *stream, demux_packet_t *dp);
+
 struct demux_packet *demux_read_packet(struct sh_stream *sh);
 double demux_get_next_pts(struct sh_stream *sh);
 bool demux_has_packet(struct sh_stream *sh);

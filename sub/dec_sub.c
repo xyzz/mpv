@@ -40,6 +40,7 @@ extern const struct sd_functions sd_srt;
 extern const struct sd_functions sd_microdvd;
 extern const struct sd_functions sd_lavf_srt;
 extern const struct sd_functions sd_lavc_conv;
+extern const struct sd_functions sd_cc;
 
 static const struct sd_functions *sd_list[] = {
 #if HAVE_LIBASS
@@ -51,6 +52,7 @@ static const struct sd_functions *sd_list[] = {
     &sd_microdvd,
     &sd_lavf_srt,
     &sd_lavc_conv,
+    &sd_cc,
     NULL
 };
 

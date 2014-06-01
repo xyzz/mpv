@@ -102,10 +102,15 @@ static void decode(struct sd *sd, struct demux_packet *packet)
         MP_WARN(sd, "Subtitle without pts, ignored\n");
         return;
     }
-    if (packet->duration <= 0) {
+    if (packet->duration == 0) {
         MP_WARN(sd, "Subtitle without duration or "
                 "duration set to 0 at pts %f, ignored\n", packet->pts);
         return;
+    }
+    if (packet->duration < 0) {
+        ass_flush_events(ctx->ass_track);
+        ctx->flush_on_seek = true;
+        iduration = 10 * 1000;
     }
     unsigned char *text = packet->buffer;
     if (!sd->no_remove_duplicates) {

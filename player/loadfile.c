@@ -430,6 +430,8 @@ static struct track *add_stream_track(struct MPContext *mpctx,
 
     demuxer_select_track(track->demuxer, stream, false);
 
+    print_file_properties(mpctx);
+
     mp_notify(mpctx, MPV_EVENT_TRACKS_CHANGED, NULL);
 
     return track;
