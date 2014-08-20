@@ -27,49 +27,55 @@
 
 #include "x11_common.h"
 #include "gl_common.h"
+#include "win.h"
 
 struct glx_context {
+    struct vo_win *x11;
     XVisualInfo *vinfo;
     GLXContext context;
     GLXFBConfig fbc;
+    Display *display;
+    int screen;
+    Window window;
+    GL *gl;
+    int depth[3];
 };
 
-static bool create_context_x11_old(struct MPGLContext *ctx)
+static bool create_context_x11_old(struct vo_win *win)
 {
-    struct glx_context *glx_ctx = ctx->priv;
-    Display *display = ctx->vo->x11->display;
-    struct vo *vo = ctx->vo;
-    GL *gl = ctx->gl;
+    struct glx_context *priv = win->priv;
+    Display *display = priv->display;
+    GL *gl = priv->gl;
 
-    if (glx_ctx->context)
+    if (priv->context)
         return true;
 
-    if (!glx_ctx->vinfo) {
-        MP_FATAL(vo, "Can't create a legacy GLX context without X visual\n");
+    if (!priv->vinfo) {
+        MP_FATAL(win, "Can't create a legacy GLX context without X visual\n");
         return false;
     }
 
-    GLXContext new_context = glXCreateContext(display, glx_ctx->vinfo, NULL,
+    GLXContext new_context = glXCreateContext(display, priv->vinfo, NULL,
                                               True);
     if (!new_context) {
-        MP_FATAL(vo, "Could not create GLX context!\n");
+        MP_FATAL(win, "Could not create GLX context!\n");
         return false;
     }
 
-    if (!glXMakeCurrent(display, ctx->vo->x11->window, new_context)) {
-        MP_FATAL(vo, "Could not set GLX context!\n");
+    if (!glXMakeCurrent(display, priv->window, new_context)) {
+        MP_FATAL(win, "Could not set GLX context!\n");
         glXDestroyContext(display, new_context);
         return false;
     }
 
-    const char *glxstr = glXQueryExtensionsString(display, ctx->vo->x11->screen);
+    const char *glxstr = glXQueryExtensionsString(display, priv->screen);
 
-    mpgl_load_functions(gl, (void *)glXGetProcAddressARB, glxstr, vo->log);
+    mpgl_load_functions(gl, (void *)glXGetProcAddressARB, glxstr, win->log);
 
-    glx_ctx->context = new_context;
+    priv->context = new_context;
 
-    if (!glXIsDirect(vo->x11->display, new_context))
-        ctx->gl->mpgl_caps &= ~MPGL_CAP_NO_SW;
+    if (!glXIsDirect(display, new_context))
+        gl->mpgl_caps &= ~MPGL_CAP_NO_SW;
 
     return true;
 }
@@ -77,27 +83,22 @@ static bool create_context_x11_old(struct MPGLContext *ctx)
 typedef GLXContext (*glXCreateContextAttribsARBProc)
     (Display*, GLXFBConfig, GLXContext, Bool, const int*);
 
-static bool create_context_x11_gl3(struct MPGLContext *ctx, bool debug)
+static bool create_context_x11_gl3(struct vo_win *win, int gl_version, bool debug)
 {
-    struct glx_context *glx_ctx = ctx->priv;
-    struct vo *vo = ctx->vo;
-
-    if (glx_ctx->context)
-        return true;
+    struct glx_context *priv = win->priv;
+    Display *display = priv->display;
 
     glXCreateContextAttribsARBProc glXCreateContextAttribsARB =
         (glXCreateContextAttribsARBProc)
             glXGetProcAddressARB((const GLubyte *)"glXCreateContextAttribsARB");
 
-    const char *glxstr =
-        glXQueryExtensionsString(vo->x11->display, vo->x11->screen);
+    const char *glxstr = glXQueryExtensionsString(display, priv->screen);
     bool have_ctx_ext = glxstr && !!strstr(glxstr, "GLX_ARB_create_context");
 
     if (!(have_ctx_ext && glXCreateContextAttribsARB)) {
         return false;
     }
 
-    int gl_version = ctx->requested_gl_version;
     int context_attribs[] = {
         GLX_CONTEXT_MAJOR_VERSION_ARB, MPGL_VER_GET_MAJOR(gl_version),
         GLX_CONTEXT_MINOR_VERSION_ARB, MPGL_VER_GET_MINOR(gl_version),
@@ -105,27 +106,26 @@ static bool create_context_x11_gl3(struct MPGLContext *ctx, bool debug)
         GLX_CONTEXT_FLAGS_ARB, debug ? GLX_CONTEXT_DEBUG_BIT_ARB : 0,
         None
     };
-    GLXContext context = glXCreateContextAttribsARB(vo->x11->display,
-                                                    glx_ctx->fbc, 0, True,
-                                                    context_attribs);
+    GLXContext context = glXCreateContextAttribsARB(display, priv->fbc, 0,
+                                                    True, context_attribs);
     if (!context) {
-        MP_ERR(vo, "Could not create GL3 context. Retrying with legacy context.\n");
+        MP_ERR(win, "Could not create GL3 context. Retrying with legacy context.\n");
         return false;
     }
 
     // set context
-    if (!glXMakeCurrent(vo->x11->display, vo->x11->window, context)) {
-        MP_FATAL(vo, "Could not set GLX context!\n");
-        glXDestroyContext(vo->x11->display, context);
+    if (!glXMakeCurrent(display, priv->window, context)) {
+        MP_FATAL(win, "Could not set GLX context!\n");
+        glXDestroyContext(display, context);
         return false;
     }
 
-    glx_ctx->context = context;
+    priv->context = context;
 
-    mpgl_load_functions(ctx->gl, (void *)glXGetProcAddress, glxstr, vo->log);
+    mpgl_load_functions(priv->gl, (void *)glXGetProcAddress, glxstr, win->log);
 
-    if (!glXIsDirect(vo->x11->display, context))
-        ctx->gl->mpgl_caps &= ~MPGL_CAP_NO_SW;
+    if (!glXIsDirect(display, context))
+        priv->gl->mpgl_caps &= ~MPGL_CAP_NO_SW;
 
     return true;
 }
@@ -134,10 +134,12 @@ static bool create_context_x11_gl3(struct MPGLContext *ctx, bool debug)
 //  http://www.opengl.org/wiki/Tutorial:_OpenGL_3.0_Context_Creation_(GLX)
 // but also uses some of the old code.
 
-static GLXFBConfig select_fb_config(struct vo *vo, const int *attribs, int flags)
+static GLXFBConfig select_fb_config(struct vo_win *win, const int *attribs,
+                                    int flags)
 {
+    struct glx_context *priv = win->priv;
     int fbcount;
-    GLXFBConfig *fbc = glXChooseFBConfig(vo->x11->display, vo->x11->screen,
+    GLXFBConfig *fbc = glXChooseFBConfig(priv->display, priv->screen,
                                          attribs, &fbcount);
     if (!fbc)
         return NULL;
@@ -147,7 +149,7 @@ static GLXFBConfig select_fb_config(struct vo *vo, const int *attribs, int flags
 
     if (flags & VOFLAG_ALPHA) {
         for (int n = 0; n < fbcount; n++) {
-            XVisualInfo *v = glXGetVisualFromFBConfig(vo->x11->display, fbc[n]);
+            XVisualInfo *v = glXGetVisualFromFBConfig(priv->display, fbc[n]);
             if (!v)
                 continue;
             // This is a heuristic at best. Note that normal 8 bit Visuals use
@@ -178,25 +180,18 @@ static void set_glx_attrib(int *attribs, int name, int value)
     }
 }
 
-static bool config_window_x11(struct MPGLContext *ctx, int flags)
+static int create_context(struct vo_win *win, int gl_version, int flags)
 {
-    struct vo *vo = ctx->vo;
-    struct glx_context *glx_ctx = ctx->priv;
-
-    if (glx_ctx->context) {
-        // GL context and window already exist.
-        // Only update window geometry etc.
-        vo_x11_config_vo_window(vo, glx_ctx->vinfo, flags, "gl");
-        return true;
-    }
+    struct glx_context *priv = win->priv;
+    Display *display = priv->display;
 
     int glx_major, glx_minor;
 
     // FBConfigs were added in GLX version 1.3.
-    if (!glXQueryVersion(vo->x11->display, &glx_major, &glx_minor) ||
+    if (!glXQueryVersion(display, &glx_major, &glx_minor) ||
         (MPGL_VER(glx_major, glx_minor) <  MPGL_VER(1, 3)))
     {
-        MP_ERR(vo, "GLX version older than 1.3.\n");
+        MP_ERR(win, "GLX version older than 1.3.\n");
         return false;
     }
 
@@ -214,7 +209,7 @@ static bool config_window_x11(struct MPGLContext *ctx, int flags)
     GLXFBConfig fbc = NULL;
     if (flags & VOFLAG_ALPHA) {
         set_glx_attrib(glx_attribs, GLX_ALPHA_SIZE, 1);
-        fbc = select_fb_config(vo, glx_attribs, flags);
+        fbc = select_fb_config(win, glx_attribs, flags);
         if (!fbc) {
             set_glx_attrib(glx_attribs, GLX_ALPHA_SIZE, 0);
             flags &= ~VOFLAG_ALPHA;
@@ -222,81 +217,138 @@ static bool config_window_x11(struct MPGLContext *ctx, int flags)
     }
     if (flags & VOFLAG_STEREO) {
         set_glx_attrib(glx_attribs, GLX_STEREO, True);
-        fbc = select_fb_config(vo, glx_attribs, flags);
+        fbc = select_fb_config(win, glx_attribs, flags);
         if (!fbc) {
-            MP_ERR(vo, "Could not find a stereo visual,"
-                       " 3D will probably not work!\n");
+            MP_ERR(win, "Could not find a stereo visual,"
+                        " 3D will probably not work!\n");
             set_glx_attrib(glx_attribs, GLX_STEREO, False);
             flags &= ~VOFLAG_STEREO;
         }
     }
     if (!fbc)
-        fbc = select_fb_config(vo, glx_attribs, flags);
+        fbc = select_fb_config(win, glx_attribs, flags);
     if (!fbc) {
-        MP_ERR(vo, "no GLX support present\n");
+        MP_ERR(win, "no GLX support present\n");
         return false;
     }
 
-    glx_ctx->fbc = fbc;
-    glx_ctx->vinfo = glXGetVisualFromFBConfig(vo->x11->display, fbc);
-    if (glx_ctx->vinfo) {
-        MP_VERBOSE(vo, "GLX chose visual with ID 0x%x\n",
-                   (int)glx_ctx->vinfo->visualid);
+    priv->fbc = fbc;
+    priv->vinfo = glXGetVisualFromFBConfig(display, fbc);
+    if (priv->vinfo) {
+        MP_VERBOSE(win, "GLX chose visual with ID 0x%x\n",
+                   (int)priv->vinfo->visualid);
     } else {
-        MP_WARN(vo, "Selected GLX FB config has no associated X visual\n");
+        MP_WARN(win, "Selected GLX FB config has no associated X visual\n");
     }
 
 
-    glXGetFBConfigAttrib(vo->x11->display, fbc, GLX_RED_SIZE, &ctx->depth_r);
-    glXGetFBConfigAttrib(vo->x11->display, fbc, GLX_GREEN_SIZE, &ctx->depth_g);
-    glXGetFBConfigAttrib(vo->x11->display, fbc, GLX_BLUE_SIZE, &ctx->depth_b);
+    glXGetFBConfigAttrib(display, fbc, GLX_RED_SIZE, &priv->depth[0]);
+    glXGetFBConfigAttrib(display, fbc, GLX_GREEN_SIZE, &priv->depth[1]);
+    glXGetFBConfigAttrib(display, fbc, GLX_BLUE_SIZE, &priv->depth[2]);
 
-    vo_x11_config_vo_window(vo, glx_ctx->vinfo, flags, "gl");
+    priv->window = vo_x11_create_gl_window(priv->x11, priv->vinfo, flags);
 
     bool success = false;
-    if (ctx->requested_gl_version >= MPGL_VER(3, 0))
-        success = create_context_x11_gl3(ctx, flags & VOFLAG_GL_DEBUG);
+    if (gl_version >= MPGL_VER(3, 0))
+        success = create_context_x11_gl3(win, gl_version, flags & VOFLAG_GL_DEBUG);
     if (!success)
-        success = create_context_x11_old(ctx);
+        success = create_context_x11_old(win);
     return success;
 }
 
-
-/**
- * \brief free the VisualInfo and GLXContext of an OpenGL context.
- * \ingroup glcontext
- */
-static void releaseGlContext_x11(MPGLContext *ctx)
+static void swap_buffers(struct vo_win *win)
 {
-    struct glx_context *glx_ctx = ctx->priv;
-    XVisualInfo **vinfo = &glx_ctx->vinfo;
-    GLXContext *context = &glx_ctx->context;
-    Display *display = ctx->vo->x11->display;
-    GL *gl = ctx->gl;
-    if (*vinfo)
-        XFree(*vinfo);
-    *vinfo = NULL;
-    if (*context) {
-        if (gl->Finish)
-            gl->Finish();
-        glXMakeCurrent(display, None, NULL);
-        glXDestroyContext(display, *context);
+    struct glx_context *priv = win->priv;
+    glXSwapBuffers(priv->display, priv->window);
+}
+
+static GL *get_gl(struct vo_win *win)
+{
+    struct glx_context *priv = win->priv;
+    return priv->gl;
+}
+
+static int preinit(struct vo_win *win)
+{
+    struct vo_win *x11 = vo_win_create_win(win, 0, &win_driver_x11);
+    if (!x11)
+        return -1;
+    struct vo_x11_state *x11_ctx = x11->priv;
+    struct glx_context *priv = win->priv = talloc(NULL, struct glx_context);
+    *priv = (struct glx_context){
+        .x11 = x11,
+        .gl = talloc_zero(priv, struct GL),
+        .display = x11_ctx->display,
+        .screen = x11_ctx->screen,
+    };
+    return 0;
+}
+
+static void uninit(struct vo_win *win)
+{
+    struct glx_context *priv = win->priv;
+
+    if (priv->vinfo)
+        XFree(priv->vinfo);
+    if (priv->context) {
+        glXMakeCurrent(priv->display, None, NULL);
+        glXDestroyContext(priv->display, priv->context);
     }
-    *context = 0;
+
+    vo_win_destroy(priv->x11);
+    talloc_free(priv);
 }
 
-static void swapGlBuffers_x11(MPGLContext *ctx)
+static int reconfig(struct vo_win *win, int w, int h, int flags)
 {
-    glXSwapBuffers(ctx->vo->x11->display, ctx->vo->x11->window);
+    struct glx_context *priv = win->priv;
+
+    return vo_win_reconfig(priv->x11, w, h, flags);
 }
 
-void mpgl_set_backend_x11(MPGLContext *ctx)
+static int control(struct vo_win *win, int request, void *arg)
 {
-    ctx->priv = talloc_zero(ctx, struct glx_context);
-    ctx->config_window = config_window_x11;
-    ctx->releaseGlContext = releaseGlContext_x11;
-    ctx->swapGlBuffers = swapGlBuffers_x11;
-    ctx->vo_init = vo_x11_init;
-    ctx->vo_uninit = vo_x11_uninit;
-    ctx->vo_control = vo_x11_control;
+    struct glx_context *priv = win->priv;
+
+    if (request == VOCTRL_GET_BIT_DEPTH) {
+        memcpy(arg, priv->depth, sizeof(priv->depth));
+        return VO_TRUE;
+    }
+
+    return vo_win_control(priv->x11, request, arg);
 }
+
+static int wait_events(struct vo_win *win, int64_t wait_until_us)
+{
+    struct glx_context *priv = win->priv;
+
+    int r = vo_win_wait_events(priv->x11, wait_until_us);
+    if (r & VO_EVENT_RESIZE) {
+        struct vo_win_size sz;
+        vo_win_get_size(priv->x11, &sz);
+        vo_win_set_size(win, &sz);
+    }
+    return r;
+}
+
+static void wakeup(struct vo_win *win)
+{
+    struct glx_context *priv = win->priv;
+
+    vo_win_wakeup(priv->x11);
+}
+
+const struct vo_win_driver win_driver_x11_gl = {
+    .name = "x11",
+    .preinit = preinit,
+    .uninit = uninit,
+    .reconfig = reconfig,
+    .control = control,
+    .wait_events = wait_events,
+    .wakeup = wakeup,
+    .gl = &(const struct vo_win_gl_driver){
+        .create_context = create_context,
+        .get_gl = get_gl,
+        .swap_buffers = swap_buffers,
+    },
+};

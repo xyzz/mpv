@@ -159,7 +159,6 @@ int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
 
 void mpgl_set_backend_cocoa(MPGLContext *ctx);
 void mpgl_set_backend_w32(MPGLContext *ctx);
-void mpgl_set_backend_x11(MPGLContext *ctx);
 void mpgl_set_backend_wayland(MPGLContext *ctx);
 
 struct vo_win;

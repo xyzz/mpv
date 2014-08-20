@@ -877,9 +877,6 @@ static const struct backend backends[] = {
 #if HAVE_GL_WAYLAND
     {"wayland", mpgl_set_backend_wayland},
 #endif
-#if HAVE_GL_X11
-    //{"x11", mpgl_set_backend_x11},
-#endif
     {0}
 };
 
@@ -1124,8 +1121,13 @@ static struct vo_win *create_legacy_wrapper(struct vo *vo, const char *name)
     return win;
 }
 
+extern const struct vo_win_driver win_driver_x11_gl;
+
 static const struct vo_win_driver *gl_win_drivers[] = {
-    NULL,
+#if HAVE_GL_X11
+    &win_driver_x11_gl,
+#endif
+    NULL
 };
 
 struct vo_win *mpgl_create_win(struct vo *vo, const char *backend_name,
