@@ -54,6 +54,7 @@
 
 struct GL;
 typedef struct GL GL;
+struct vo_win;
 
 void glAdjustAlignment(GL *gl, int stride);
 int glFmt2bpp(GLenum format, GLenum type);
@@ -139,11 +140,11 @@ typedef struct MPGLContext {
 MPGLContext *mpgl_init(struct vo *vo, const char *backend_name);
 void mpgl_uninit(MPGLContext *ctx);
 
-void mpgl_lock(MPGLContext *ctx);
-void mpgl_unlock(MPGLContext *ctx);
-void mpgl_set_context(MPGLContext *ctx);
-void mpgl_unset_context(MPGLContext *ctx);
-bool mpgl_is_thread_safe(MPGLContext *ctx);
+MPGLContext *mpgl_get_legacy_context(struct vo_win *win);
+
+void mpgl_lock(struct vo_win *win);
+void mpgl_unlock(struct vo_win *win);
+GL *mpgl_get_gl(struct vo_win *win);
 
 // Create a VO window and create a GL context on it.
 // (Calls config_window_gl3 or config_window+setGlWindow.)
@@ -151,8 +152,6 @@ bool mpgl_is_thread_safe(MPGLContext *ctx);
 // flags: passed to the backend's create window function
 // Returns success.
 bool mpgl_config_window(struct MPGLContext *ctx, int gl_caps, int flags);
-
-int mpgl_find_backend(const char *name);
 
 struct m_option;
 int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
@@ -163,12 +162,42 @@ void mpgl_set_backend_w32(MPGLContext *ctx);
 void mpgl_set_backend_x11(MPGLContext *ctx);
 void mpgl_set_backend_wayland(MPGLContext *ctx);
 
+struct vo_win;
+
+struct vo_win_gl_driver {
+    // Creates a GL context according to what's specified in the MPGL_VER-mangled
+    // requested_gl_version. This is just a hint, and if the requested version
+    // is not available, it may return a completely different GL context. (The
+    // caller must check if the created GL version is ok. The callee must try
+    // to fall back to an older version if the requested version is not
+    // available, and newer versions are incompatible.)
+    int (*create_context)(struct vo_win *win, int requested_gl_version,
+                          int flags);
+
+    GL *(*get_gl)(struct vo_win *win);
+
+    void (*swap_buffers)(struct vo_win *win);
+    void (*set_current)(struct vo_win *win, bool current);
+
+    // An optional function to register a resize callback in the backend that
+    // can be called on separate thread to handle resize events immediately
+    // (without waiting for vo_check_events, which will come later for the
+    // proper resize)
+    void (*register_resize_callback)(struct vo_win *win,
+                                     void (*cb)(void *ctx, int w, int h),
+                                     void *cb_ctx);
+};
+
+struct vo_win *mpgl_create_win(struct vo *vo, const char *backend_name,
+                               int gl_caps, int flags);
+
 struct mp_hwdec_info;
 
 struct gl_hwdec {
     const struct gl_hwdec_driver *driver;
     struct mp_log *log;
     struct MPGLContext *mpgl;
+    struct vo_win *win;
     struct mp_hwdec_info *info;
     // For free use by hwdec driver
     void *priv;

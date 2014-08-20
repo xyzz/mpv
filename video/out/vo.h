@@ -39,6 +39,7 @@ enum mp_voctrl {
     VOCTRL_RESET = 1,
     /* Handle input and redraw events, called by vo_check_events() */
     VOCTRL_CHECK_EVENTS,
+    VOCTRL_GET_WIN_SIZE,
     /* used to switch to fullscreen */
     VOCTRL_FULLSCREEN,
     /* signal a device pause */
@@ -87,6 +88,7 @@ enum mp_voctrl {
     VOCTRL_GET_ICC_PROFILE_PATH,        // char**
     VOCTRL_GET_DISPLAY_FPS,             // double*
     VOCTRL_GET_RECENT_FLIP_TIME,        // int64_t* (using mp_time_us())
+    VOCTRL_GET_BIT_DEPTH,               // int[3] (r/g/b)
 
     VOCTRL_GET_PREF_DEINT,              // int*
 };
@@ -122,10 +124,14 @@ struct voctrl_screenshot_args {
     bool has_osd;
 };
 
+struct vo_win_size {
+    int w, h;
+    double monitor_par;
+};
+
 #define VO_TRUE         true
 #define VO_FALSE        false
-#define VO_ERROR        -1
-#define VO_NOTAVAIL     -2
+#define VO_ERROR        VO_FALSE
 #define VO_NOTIMPL      -3
 
 #define VOFLAG_FLIPPING         0x08
@@ -293,6 +299,9 @@ int vo_query_format(struct vo *vo, int format);
 void vo_set_flip_queue_offset(struct vo *vo, int64_t us);
 int64_t vo_get_vsync_interval(struct vo *vo);
 void vo_wakeup(struct vo *vo);
+
+int vo_default_wait_events(struct vo *vo, int64_t wait_until_us);
+void vo_default_wakeup(struct vo *vo);
 
 const char *vo_get_window_title(struct vo *vo);
 

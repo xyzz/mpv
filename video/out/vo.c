@@ -419,18 +419,12 @@ static void wait_event_fd(struct vo *vo, int64_t until_time){}
 static void wakeup_event_fd(struct vo *vo){}
 #endif
 
-// Called unlocked.
-static void wait_vo(struct vo *vo, int64_t until_time)
+int vo_default_wait_events(struct vo *vo, int64_t until_time)
 {
     struct vo_internal *in = vo->in;
 
     if (vo->event_fd >= 0) {
         wait_event_fd(vo, until_time);
-        pthread_mutex_lock(&in->lock);
-        in->need_wakeup = false;
-        pthread_mutex_unlock(&in->lock);
-    } else if (vo->driver->wait_events) {
-        vo->driver->wait_events(vo, until_time);
         pthread_mutex_lock(&in->lock);
         in->need_wakeup = false;
         pthread_mutex_unlock(&in->lock);
@@ -441,6 +435,34 @@ static void wait_vo(struct vo *vo, int64_t until_time)
         in->need_wakeup = false;
         pthread_mutex_unlock(&in->lock);
     }
+    return 0;
+}
+
+// Called unlocked.
+static void wait_vo(struct vo *vo, int64_t until_time)
+{
+    struct vo_internal *in = vo->in;
+
+    if (vo->driver->wait_events) {
+        vo->driver->wait_events(vo, until_time);
+        pthread_mutex_lock(&in->lock);
+        in->need_wakeup = false;
+        pthread_mutex_unlock(&in->lock);
+    } else {
+        vo_default_wait_events(vo, until_time);
+    }
+}
+
+void vo_default_wakeup(struct vo *vo)
+{
+    struct vo_internal *in = vo->in;
+
+    // Due to the intended use-case of being called from vo->driver->wakeup(),
+    // this assumes the in->lock is already held.
+    pthread_cond_signal(&in->wakeup);
+    if (vo->event_fd >= 0)
+        wakeup_event_fd(vo);
+    in->need_wakeup = true;
 }
 
 static void wakeup_locked(struct vo *vo)
@@ -450,8 +472,11 @@ static void wakeup_locked(struct vo *vo)
     pthread_cond_signal(&in->wakeup);
     if (vo->event_fd >= 0)
         wakeup_event_fd(vo);
-    if (vo->driver->wakeup)
+    if (vo->driver->wakeup) {
         vo->driver->wakeup(vo);
+    } else {
+        vo_default_wakeup(vo);
+    }
     in->need_wakeup = true;
 }
 
@@ -659,10 +684,8 @@ static void *vo_thread(void *ptr)
         return NULL;
 
     while (1) {
-        mp_dispatch_queue_process(vo->in->dispatch, 0);
         if (in->terminate)
             break;
-        vo->driver->control(vo, VOCTRL_CHECK_EVENTS, NULL);
         bool frame_shown = render_frame(vo);
         int64_t now = mp_time_us();
         int64_t wait_until = now + (frame_shown ? 0 : (int64_t)1e9);
@@ -681,6 +704,8 @@ static void *vo_thread(void *ptr)
             do_redraw(vo); // now is a good time
             continue;
         }
+        mp_dispatch_queue_process(vo->in->dispatch, 0);
+        vo->driver->control(vo, VOCTRL_CHECK_EVENTS, NULL);
         wait_vo(vo, wait_until);
     }
     forget_frames(vo); // implicitly synchronized

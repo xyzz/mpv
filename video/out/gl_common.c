@@ -41,6 +41,7 @@
 #include <assert.h>
 #include "talloc.h"
 #include "gl_common.h"
+#include "win.h"
 #include "common/common.h"
 #include "options/options.h"
 #include "options/m_option.h"
@@ -882,7 +883,7 @@ static const struct backend backends[] = {
     {0}
 };
 
-int mpgl_find_backend(const char *name)
+static int mpgl_find_backend(const char *name)
 {
     if (name == NULL || strcmp(name, "auto") == 0)
         return -1;
@@ -978,31 +979,211 @@ void mpgl_uninit(MPGLContext *ctx)
     talloc_free(ctx);
 }
 
-void mpgl_set_context(MPGLContext *ctx)
+struct old_ctx {
+    MPGLContext *glctx;
+};
+
+static int old_preinit(struct vo_win *win)
 {
-    if (ctx->set_current)
-        ctx->set_current(ctx, true);
+    return 0;
 }
 
-void mpgl_unset_context(MPGLContext *ctx)
+static void old_uninit(struct vo_win *win)
 {
-    if (ctx->set_current)
-        ctx->set_current(ctx, false);
+    MPGLContext *glctx = win->priv;
+    mpgl_uninit(glctx);
 }
 
-void mpgl_lock(MPGLContext *ctx)
+static void size_vo_to_win(struct vo_win *win)
 {
-    mpgl_set_context(ctx);
+    MPGLContext *glctx = win->priv;
+    struct vo *vo = glctx->vo;
+    struct vo_win_size sz = {vo->dwidth, vo->dheight, vo->monitor_par};
+    vo_win_set_size(win, &sz);
 }
 
-void mpgl_unlock(MPGLContext *ctx)
+static int old_reconfig(struct vo_win *win, int w, int h, int flags)
 {
-    mpgl_unset_context(ctx);
+    MPGLContext *glctx = win->priv;
+    // The older API ignores w/h, and gets it directly from vo->params
+    int r = glctx->config_window(glctx, flags) ? 0 : -1;
+    if (r >= 0)
+        size_vo_to_win(win);
+    return r;
 }
 
-bool mpgl_is_thread_safe(MPGLContext *ctx)
+static int old_control(struct vo_win *win, int request, void *arg)
 {
-    return !!ctx->set_current;
+    MPGLContext *glctx = win->priv;
+    if (request == VOCTRL_GET_BIT_DEPTH) {
+        int *depth = arg;
+        depth[0] = glctx->depth_r;
+        depth[1] = glctx->depth_g;
+        depth[2] = glctx->depth_b;
+        return VO_TRUE;
+    }
+    int events = 0;
+    int r = glctx->vo_control(glctx->vo, &events, request, arg);
+    vo_win_signal_event(win, events);
+    if (r & VO_EVENT_RESIZE)
+        size_vo_to_win(win);
+    return r;
+}
+
+static int old_wait_events(struct vo_win *win, int64_t wait_until_us)
+{
+    MPGLContext *glctx = win->priv;
+    int r = vo_default_wait_events(glctx->vo, wait_until_us);
+    int events = 0;
+    glctx->vo_control(glctx->vo, &events, VOCTRL_CHECK_EVENTS, NULL);
+    r |= events;
+    if (r & VO_EVENT_RESIZE)
+        size_vo_to_win(win);
+    return r;
+}
+
+static void old_wakeup(struct vo_win *win)
+{
+    MPGLContext *glctx = win->priv;
+    vo_default_wakeup(glctx->vo);
+}
+
+static int old_create_context(struct vo_win *win, int requested_gl_version,
+                              int flags)
+{
+    MPGLContext *glctx = win->priv;
+    glctx->requested_gl_version = requested_gl_version;
+    return glctx->config_window(glctx, VOFLAG_HIDDEN | flags) ? 0 : -1;
+}
+
+static GL *old_get_gl(struct vo_win *win)
+{
+    MPGLContext *glctx = win->priv;
+    return glctx->gl;
+}
+
+static void old_swap_buffers(struct vo_win *win)
+{
+    MPGLContext *glctx = win->priv;
+    glctx->swapGlBuffers(glctx);
+}
+
+static void old_set_current(struct vo_win *win, bool current)
+{
+    MPGLContext *glctx = win->priv;
+    if (glctx->set_current)
+        glctx->set_current(glctx, current);
+}
+
+static void old_register_resize_callback(struct vo_win *win,
+                                         void (*cb)(void *ctx, int w, int h),
+                                         void *cb_ctx)
+{
+    MPGLContext *glctx = win->priv;
+    assert(cb_ctx == glctx->vo); // hard to do otherwise
+    void (*ncb)(struct vo *vo, int w, int h) = (void *)cb; // invalid, but hey
+    if (glctx->register_resize_callback)
+        glctx->register_resize_callback(glctx->vo, ncb);
+}
+
+static struct vo_win_gl_driver emulate_old_gl_crap = {
+    .create_context = old_create_context,
+    .get_gl = old_get_gl,
+    .swap_buffers = old_swap_buffers,
+    .set_current = old_set_current,
+    .register_resize_callback = old_register_resize_callback,
+};
+
+static const struct vo_win_driver emulate_old_crap = {
+    .name = "legacy",
+    .preinit = old_preinit,
+    .uninit = old_uninit,
+    .reconfig = old_reconfig,
+    .control = old_control,
+    .wait_events = old_wait_events,
+    .wakeup = old_wakeup,
+    .gl = &emulate_old_gl_crap,
+};
+
+MPGLContext *mpgl_get_legacy_context(struct vo_win *win)
+{
+    return win->driver == &emulate_old_crap ? win->priv : NULL;
+}
+
+static struct vo_win *create_legacy_wrapper(struct vo *vo, const char *name)
+{
+    MPGLContext *glctx = mpgl_init(vo, name);
+    if (!glctx)
+        return NULL;
+
+    struct vo_win *win = vo_win_create_vo(vo, 0, &emulate_old_crap);
+    if (!win)
+        return NULL;
+
+    win->priv = glctx;
+    return win;
+}
+
+static const struct vo_win_driver *gl_win_drivers[] = {
+    NULL,
+};
+
+struct vo_win *mpgl_create_win(struct vo *vo, const char *backend_name,
+                               int gl_caps, int flags)
+{
+    if (backend_name && (!backend_name[0] || strcmp(backend_name, "auto") == 0))
+        backend_name = NULL;
+
+    struct vo_win *win = NULL;
+    for (int n = 0; gl_win_drivers[n]; n++) {
+        if (!backend_name || strcmp(gl_win_drivers[n]->name, backend_name) == 0)
+        {
+            win = vo_win_create(vo->global, vo->log, vo->input_ctx, 0,
+                                gl_win_drivers[n]);
+            if (win)
+                break;
+        }
+    }
+    if (!win)
+        win = create_legacy_wrapper(vo, backend_name);
+    if (!win || !win->driver->gl)
+        goto fail;
+    int gl_version = gl_caps & MPGL_CAP_GL_LEGACY ? MPGL_VER(2, 1) : MPGL_VER(3, 0);
+    if (win->driver->gl->create_context(win, gl_version, flags) < 0)
+        goto fail;
+
+    GL *gl = win->driver->gl->get_gl(win);
+    int missing = (gl->mpgl_caps & gl_caps) ^ gl_caps;
+    if (!missing)
+        return win;
+
+    MP_WARN(win, "Missing OpenGL features:");
+    list_features(missing, win->log, MSGL_WARN, false);
+    if (missing == MPGL_CAP_NO_SW) {
+        MP_WARN(win, "Rejecting suspected software OpenGL renderer.\n");
+    } else if ((missing & MPGL_CAP_GL21) && (gl->mpgl_caps & MPGL_CAP_GL_LEGACY)) {
+        MP_WARN(win, "OpenGL version too old. Try: --vo=opengl-old\n");
+    }
+fail:
+    vo_win_destroy(win);
+    return NULL;
+}
+
+void mpgl_lock(struct vo_win *win)
+{
+    if (win->driver->gl && win->driver->gl->set_current)
+        win->driver->gl->set_current(win, true);
+}
+
+void mpgl_unlock(struct vo_win *win)
+{
+    if (win->driver->gl && win->driver->gl->set_current)
+        win->driver->gl->set_current(win, false);
+}
+
+GL *mpgl_get_gl(struct vo_win *win)
+{
+    return win->driver->gl->get_gl(win);
 }
 
 void mp_log_source(struct mp_log *log, int lev, const char *src)

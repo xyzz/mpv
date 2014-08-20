@@ -370,6 +370,7 @@ def build(ctx):
         ( "video/out/vo_xv.c",                   "xv" ),
         ( "video/out/w32_common.c",              "gdi" ),
         ( "video/out/wayland_common.c",          "wayland" ),
+        ( "video/out/win.c"),
         ( "video/out/win_state.c"),
         ( "video/out/x11_common.c",              "x11" ),
 

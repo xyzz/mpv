@@ -278,6 +278,7 @@ SOURCES = audio/audio.c \
           video/out/vo.c \
           video/out/vo_null.c \
           video/out/vo_image.c \
+          video/out/win.c \
           video/out/win_state.c \
           $(SOURCES-yes)
 
