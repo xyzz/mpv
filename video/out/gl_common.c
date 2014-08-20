@@ -878,7 +878,7 @@ static const struct backend backends[] = {
     {"wayland", mpgl_set_backend_wayland},
 #endif
 #if HAVE_GL_X11
-    {"x11", mpgl_set_backend_x11},
+    //{"x11", mpgl_set_backend_x11},
 #endif
     {0}
 };
@@ -1208,13 +1208,13 @@ extern const struct gl_hwdec_driver gl_hwdec_vdpau;
 
 const struct gl_hwdec_driver *const mpgl_hwdec_drivers[] = {
 #if HAVE_VAAPI_GLX
-    &gl_hwdec_vaglx,
+    //&gl_hwdec_vaglx,
 #endif
 #if HAVE_VDA_GL
     &gl_hwdec_vda,
 #endif
 #if HAVE_VDPAU_GL_X11
-    &gl_hwdec_vdpau,
+    //&gl_hwdec_vdpau,
 #endif
     NULL
 };
