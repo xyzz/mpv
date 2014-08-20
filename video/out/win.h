@@ -38,18 +38,13 @@ struct vo_win_driver {
      */
     int (*control)(struct vo_win *win, int request, void *arg);
 
-    /* Run the event loop.
+    /* Run the event loop. See vo_driver->wait_events for remarks. Unlike the
+     * VO function, this returns VO_EVENT_* bits, which tell the caller if
+     * an event happened.
      */
     int (*wait_events)(struct vo_win *win, int64_t wait_until_us);
 
-    /* For threaded backends only. This is the only driver function that
-     * needs to be thread-safe. This callback should wake up the GUI event
-     * loop, and cause it to call vo_win_backend_dispatch(). That function
-     * call should be in the context of the GUI thread, and will call further
-     * driver functions.
-     * Note that wakeup can return immediately. It doesn't/mustn't have to
-     * wait until the GUI thread is done.
-     * TODO: clarify how to avoid missed wakeups
+    /* Interrupt wait_events. See vo_driver->wakeup for remarks.
      */
     void (*wakeup)(struct vo_win *win);
 
@@ -125,6 +120,7 @@ int vo_win_wait_events(struct vo_win *win, int64_t until_time_us);
 // Unblock an ongoing vo_win_wait_events() call.
 void vo_win_wakeup(struct vo_win *win);
 
+// Wait/wakeup functions that use win->event_fd to wakeup on events.
 void vo_win_wait_event_fd(struct vo_win *win, int64_t until_time);
 void vo_win_wakeup_event_fd(struct vo_win *win);
 
