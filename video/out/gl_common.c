@@ -858,6 +858,8 @@ mp_image_t *glGetWindowScreenshot(GL *gl)
     return image;
 }
 
+// --- legacy start
+
 typedef void (*MPGLSetBackendFn)(MPGLContext *ctx);
 
 struct backend {
@@ -1111,6 +1113,8 @@ static struct vo_win *create_legacy_wrapper(struct vo *vo, const char *name)
     win->priv = glctx;
     return win;
 }
+
+// --- legacy end
 
 extern const struct vo_win_driver win_driver_x11_gl;
 

@@ -99,6 +99,8 @@ enum {
 
 #define MPGL_VER_P(ver) MPGL_VER_GET_MAJOR(ver), MPGL_VER_GET_MINOR(ver)
 
+// --- legacy start
+
 typedef struct MPGLContext {
     GL *gl;
     struct vo *vo;
@@ -142,10 +144,6 @@ void mpgl_uninit(MPGLContext *ctx);
 
 MPGLContext *mpgl_get_legacy_context(struct vo_win *win);
 
-void mpgl_lock(struct vo_win *win);
-void mpgl_unlock(struct vo_win *win);
-GL *mpgl_get_gl(struct vo_win *win);
-
 // Create a VO window and create a GL context on it.
 // (Calls config_window_gl3 or config_window+setGlWindow.)
 // gl_caps: bitfield of MPGL_CAP_* (required GL version and feature set)
@@ -153,13 +151,19 @@ GL *mpgl_get_gl(struct vo_win *win);
 // Returns success.
 bool mpgl_config_window(struct MPGLContext *ctx, int gl_caps, int flags);
 
-struct m_option;
-int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
-                              struct bstr name, struct bstr param);
-
 void mpgl_set_backend_cocoa(MPGLContext *ctx);
 void mpgl_set_backend_w32(MPGLContext *ctx);
 void mpgl_set_backend_wayland(MPGLContext *ctx);
+
+// --- legacy end
+
+void mpgl_lock(struct vo_win *win);
+void mpgl_unlock(struct vo_win *win);
+GL *mpgl_get_gl(struct vo_win *win);
+
+struct m_option;
+int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
+                              struct bstr name, struct bstr param);
 
 struct vo_win;
 
