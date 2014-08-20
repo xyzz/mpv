@@ -11,7 +11,6 @@
 
 struct vo_win_internal {
     int events;
-    struct vo_win_size win_size;
 };
 
 struct vo_win *vo_win_create(struct mpv_global *global, struct mp_log *log,
@@ -59,25 +58,10 @@ void vo_win_signal_event(struct vo_win *win, int events)
     win->in->events |= events;
 }
 
-void vo_win_set_size(struct vo_win *win, struct vo_win_size *sz)
-{
-    struct vo_win_size *old = &win->in->win_size;
-    if (old->w != sz->w || old->h != sz->h || old->monitor_par != sz->monitor_par)
-    {
-        win->in->win_size = *sz;
-        win->in->events |= VO_EVENT_RESIZE;
-    }
-}
-
-void vo_win_get_size(struct vo_win *win, struct vo_win_size *sz)
-{
-    *sz = win->in->win_size;
-}
-
 void vo_win_get_size_vo(struct vo_win *win, struct vo *vo)
 {
-    struct vo_win_size sz;
-    vo_win_get_size(win, &sz);
+    struct vo_win_size sz = {0};
+    vo_win_control(win, VOCTRL_GET_SIZE, &sz);
     vo->dwidth = sz.w;
     vo->dheight = sz.h;
     vo->monitor_par = sz.monitor_par;

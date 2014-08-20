@@ -322,13 +322,7 @@ static int wait_events(struct vo_win *win, int64_t wait_until_us)
 {
     struct glx_context *priv = win->priv;
 
-    int r = vo_win_wait_events(priv->x11, wait_until_us);
-    if (r & VO_EVENT_RESIZE) {
-        struct vo_win_size sz;
-        vo_win_get_size(priv->x11, &sz);
-        vo_win_set_size(win, &sz);
-    }
-    return r;
+    return vo_win_wait_events(priv->x11, wait_until_us);
 }
 
 static void wakeup(struct vo_win *win)

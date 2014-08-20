@@ -91,6 +91,9 @@ enum mp_voctrl {
     VOCTRL_GET_BIT_DEPTH,               // int[3] (r/g/b)
 
     VOCTRL_GET_PREF_DEINT,              // int*
+
+    // Used by vo_win infrastructure only.
+    VOCTRL_GET_SIZE,                    // struct vo_win_size*
 };
 
 // VOCTRL_SET_EQUALIZER

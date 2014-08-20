@@ -80,8 +80,6 @@ struct vo_win {
  */
 void vo_win_signal_event(struct vo_win *win, int events);
 
-void vo_win_set_size(struct vo_win *win, struct vo_win_size *sz);
-
 /* For threaded backends only. Call this to process requests from the VO
  * thread, usually in reaction to vo_win_driver.wakeup.
  */
@@ -117,7 +115,6 @@ int vo_win_reconfig_vo(struct vo_win *win, struct vo *vo, int flags);
 int vo_win_control(struct vo_win *win, int request, void *data);
 
 // Return the window size. If none is available, return 0x0.
-void vo_win_get_size(struct vo_win *win, struct vo_win_size *sz);
 void vo_win_get_size_vo(struct vo_win *win, struct vo *vo);
 
 // Wait, and return until either new events are available, or the given time

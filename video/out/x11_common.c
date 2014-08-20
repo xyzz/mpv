@@ -1443,14 +1443,11 @@ static void vo_x11_update_geometry(struct vo_win *win)
         XTranslateCoordinates(x11->display, x11->window, x11->rootwin, 0, 0,
                               &x, &y, &dummy_win);
     }
-    x11->winrc = (struct mp_rect){x, y, x + w, y + h};
 
-    struct vo_win_size sz = {
-        .w = RC_W(x11->winrc),
-        .h = RC_H(x11->winrc),
-        .monitor_par = vo_calc_monitor_par(win->opts, &x11->screenrc),
-    };
-    vo_win_set_size(win, &sz);
+    if (RC_W(x11->winrc) != w || RC_H(x11->winrc) != h)
+        vo_win_signal_event(win, VO_EVENT_RESIZE);
+
+    x11->winrc = (struct mp_rect){x, y, x + w, y + h};
 
     double fps = 1000.0;
     for (int n = 0; n < x11->num_displays; n++) {
@@ -1531,6 +1528,13 @@ static int vo_x11_control(struct vo_win *win, int request, void *arg)
 {
     struct vo_x11_state *x11 = win->priv;
     switch (request) {
+    case VOCTRL_GET_SIZE:
+        *(struct vo_win_size *)arg = (struct vo_win_size){
+            .w = RC_W(x11->winrc),
+            .h = RC_H(x11->winrc),
+            .monitor_par = vo_calc_monitor_par(win->opts, &x11->screenrc),
+        };
+        return VO_TRUE;
     case VOCTRL_FULLSCREEN:
         vo_x11_fullscreen(win);
         vo_win_signal_event(win, VO_EVENT_RESIZE);

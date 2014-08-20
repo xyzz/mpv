@@ -991,22 +991,11 @@ static void old_uninit(struct vo_win *win)
     mpgl_uninit(glctx);
 }
 
-static void size_vo_to_win(struct vo_win *win)
-{
-    MPGLContext *glctx = win->priv;
-    struct vo *vo = glctx->vo;
-    struct vo_win_size sz = {vo->dwidth, vo->dheight, vo->monitor_par};
-    vo_win_set_size(win, &sz);
-}
-
 static int old_reconfig(struct vo_win *win, int w, int h, int flags)
 {
     MPGLContext *glctx = win->priv;
     // The older API ignores w/h, and gets it directly from vo->params
-    int r = glctx->config_window(glctx, flags) ? 0 : -1;
-    if (r >= 0)
-        size_vo_to_win(win);
-    return r;
+    return glctx->config_window(glctx, flags) ? 0 : -1;
 }
 
 static int old_control(struct vo_win *win, int request, void *arg)
@@ -1019,11 +1008,15 @@ static int old_control(struct vo_win *win, int request, void *arg)
         depth[2] = glctx->depth_b;
         return VO_TRUE;
     }
+    if (request == VOCTRL_GET_SIZE) {
+        *(struct vo_win_size *)arg = (struct vo_win_size){
+            glctx->vo->dwidth, glctx->vo->dheight, glctx->vo->monitor_par};
+        return VO_TRUE;
+    }
+
     int events = 0;
     int r = glctx->vo_control(glctx->vo, &events, request, arg);
     vo_win_signal_event(win, events);
-    if (r & VO_EVENT_RESIZE)
-        size_vo_to_win(win);
     return r;
 }
 
@@ -1034,8 +1027,6 @@ static int old_wait_events(struct vo_win *win, int64_t wait_until_us)
     int events = 0;
     glctx->vo_control(glctx->vo, &events, VOCTRL_CHECK_EVENTS, NULL);
     r |= events;
-    if (r & VO_EVENT_RESIZE)
-        size_vo_to_win(win);
     return r;
 }
 
