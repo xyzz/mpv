@@ -1,6 +1,9 @@
 #ifndef MP_VO_WIN_H_
 #define MP_VO_WIN_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+
 struct vo_win;
 struct vo_win_size;
 struct vo;
@@ -63,6 +66,12 @@ struct vo_win {
     struct mp_vo_opts *opts;
     struct vo_win_internal *in;
 
+    bool probing;
+
+    // For VOs which use poll() to wait for new events.
+    int event_fd;
+    int wakeup_pipe[2];
+
     void *priv; // for free use by vo_win_driver
 };
 
@@ -92,6 +101,8 @@ struct vo_win *vo_win_create(struct mpv_global *global, struct mp_log *log,
 
 struct vo_win *vo_win_create_vo(struct vo *vo, int flags,
                                 const struct vo_win_driver *driver);
+struct vo_win *vo_win_create_win(struct vo_win *win, int flags,
+                                 const struct vo_win_driver *driver);
 
 void vo_win_destroy(struct vo_win *win);
 
@@ -116,5 +127,8 @@ int vo_win_wait_events(struct vo_win *win, int64_t until_time_us);
 
 // Unblock an ongoing vo_win_wait_events() call.
 void vo_win_wakeup(struct vo_win *win);
+
+void vo_win_wait_event_fd(struct vo_win *win, int64_t until_time);
+void vo_win_wakeup_event_fd(struct vo_win *win);
 
 #endif

@@ -20,19 +20,16 @@
 
 #include "video/mp_image.h"
 
-static void calc_monitor_aspect(struct mp_vo_opts *opts, int scr_w, int scr_h,
-                                double *pixelaspect, int *w, int *h)
+double vo_calc_monitor_par(struct mp_vo_opts *opts, const struct mp_rect *screen)
 {
-    *pixelaspect = 1.0 / opts->monitor_pixel_aspect;
+    double pixelaspect = 1.0 / opts->monitor_pixel_aspect;
 
+    int scr_w = mp_rect_w(*screen);
+    int scr_h = mp_rect_h(*screen);
     if (scr_w > 0 && scr_h > 0 && opts->force_monitor_aspect)
-        *pixelaspect = opts->force_monitor_aspect * scr_h / scr_w;
+        pixelaspect = opts->force_monitor_aspect * scr_h / scr_w;
 
-    if (*pixelaspect < 1) {
-        *h /= *pixelaspect;
-    } else {
-        *w *= *pixelaspect;
-    }
+    return pixelaspect;
 }
 
 // Fit *w/*h into the size specified by geo.
@@ -72,9 +69,7 @@ static void apply_autofit(int *w, int *h, int scr_w, int scr_h,
 void vo_calc_window_geometry(struct vo *vo, const struct mp_rect *screen,
                              struct vo_win_geometry *out_geo)
 {
-    struct mp_vo_opts *opts = vo->opts;
 
-    *out_geo = (struct vo_win_geometry){0};
 
     // The case of calling this function even though no video was configured
     // yet (i.e. vo->params==NULL) happens when vo_opengl creates a hidden
@@ -88,12 +83,24 @@ void vo_calc_window_geometry(struct vo *vo, const struct mp_rect *screen,
     if ((vo->driver->caps & VO_CAP_ROTATE90) && params.rotate % 180 == 90)
         MPSWAP(int, d_w, d_h);
 
+    vo_calc_window_size(vo->opts, d_w, d_h, screen, out_geo);
+}
+
+void vo_calc_window_size(struct mp_vo_opts *opts, int d_w, int d_h,
+                         const struct mp_rect *screen,
+                         struct vo_win_geometry *out_geo)
+{
+    *out_geo = (struct vo_win_geometry){0};
+
     int scr_w = screen->x1 - screen->x0;
     int scr_h = screen->y1 - screen->y0;
 
-    MP_DBG(vo, "screen size: %dx%d\n", scr_w, scr_h);
-
-    calc_monitor_aspect(opts, scr_w, scr_h, &out_geo->monitor_par, &d_w, &d_h);
+    double monitor_par = vo_calc_monitor_par(opts, screen);
+    if (monitor_par < 1) {
+        scr_h /= monitor_par;
+    } else {
+        scr_w *= monitor_par;
+    }
 
     apply_autofit(&d_w, &d_h, scr_w, scr_h, &opts->autofit, true);
     apply_autofit(&d_w, &d_h, scr_w, scr_h, &opts->autofit_larger, false);

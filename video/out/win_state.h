@@ -4,6 +4,7 @@
 #include "common/common.h"
 
 struct vo;
+struct mp_vo_opts;
 
 enum {
     // By user settings, the window manager's chosen window position should
@@ -26,5 +27,11 @@ struct vo_win_geometry {
 void vo_calc_window_geometry(struct vo *vo, const struct mp_rect *screen,
                              struct vo_win_geometry *out_geo);
 void vo_apply_window_geometry(struct vo *vo, const struct vo_win_geometry *geo);
+
+double vo_calc_monitor_par(struct mp_vo_opts *opts, const struct mp_rect *screen);
+
+void vo_calc_window_size(struct mp_vo_opts *opts, int d_w, int d_h,
+                         const struct mp_rect *screen,
+                         struct vo_win_geometry *out_geo);
 
 #endif

@@ -1,3 +1,6 @@
+#include "osdep/io.h"
+#include "osdep/timer.h"
+
 #include "common/common.h"
 #include "common/global.h"
 #include "common/msg.h"
@@ -28,6 +31,7 @@ struct vo_win *vo_win_create(struct mpv_global *global, struct mp_log *log,
         talloc_free(win);
         return NULL;
     }
+    mp_make_wakeup_pipe(win->wakeup_pipe);
     return win;
 }
 
@@ -35,6 +39,12 @@ struct vo_win *vo_win_create_vo(struct vo *vo, int flags,
                                 const struct vo_win_driver *driver)
 {
     return vo_win_create(vo->global, vo->log, vo->input_ctx, flags, driver);
+}
+
+struct vo_win *vo_win_create_win(struct vo_win *win, int flags,
+                                 const struct vo_win_driver *driver)
+{
+    return vo_win_create(win->global, win->log, win->input_ctx, flags, driver);
 }
 
 void vo_win_destroy(struct vo_win *win)
@@ -51,7 +61,12 @@ void vo_win_signal_event(struct vo_win *win, int events)
 
 void vo_win_set_size(struct vo_win *win, struct vo_win_size *sz)
 {
-    win->in->win_size = *sz;
+    struct vo_win_size *old = &win->in->win_size;
+    if (old->w != sz->w || old->h != sz->h || old->monitor_par != sz->monitor_par)
+    {
+        win->in->win_size = *sz;
+        win->in->events |= VO_EVENT_RESIZE;
+    }
 }
 
 void vo_win_get_size(struct vo_win *win, struct vo_win_size *sz)
@@ -77,7 +92,13 @@ int vo_win_reconfig_vo(struct vo_win *win, struct vo *vo, int flags)
 {
     if (!vo->params)
         return -1;
-    int r = vo_win_reconfig(win, vo->params->d_w, vo->params->d_h, flags);
+
+    int d_w = vo->params->d_w;
+    int d_h = vo->params->d_h;
+    if ((vo->driver->caps & VO_CAP_ROTATE90) && vo->params->rotate % 180 == 90)
+        MPSWAP(int, d_w, d_h);
+
+    int r = vo_win_reconfig(win, d_w, d_h, flags);
     if (r >= 0)
         vo_win_get_size_vo(win, vo);
     return r;
@@ -109,3 +130,28 @@ void vo_win_wakeup(struct vo_win *win)
 {
     win->driver->wakeup(win);
 }
+
+#ifndef __MINGW32__
+#include <unistd.h>
+#include <poll.h>
+void vo_win_wait_event_fd(struct vo_win *win, int64_t until_time)
+{
+    struct pollfd fds[2] = {
+        { .fd = win->event_fd, .events = POLLIN },
+        { .fd = win->wakeup_pipe[0], .events = POLLIN },
+    };
+    int64_t wait_us = until_time - mp_time_us();
+    int timeout_ms = MPCLAMP((wait_us + 500) / 1000, 0, 10000);
+
+    poll(fds, 2, timeout_ms);
+
+    if (fds[1].revents & POLLIN) {
+        char buf[100];
+        read(win->wakeup_pipe[0], buf, sizeof(buf)); // flush
+    }
+}
+void vo_win_wakeup_event_fd(struct vo_win *win)
+{
+    write(win->wakeup_pipe[1], &(char){0}, 1);
+}
+#endif
