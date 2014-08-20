@@ -26,7 +26,7 @@
 
 #include "common/common.h"
 
-struct vo;
+struct vo_win;
 struct mp_log;
 
 #define MAX_DISPLAYS 32 // ought to be enough for everyone
@@ -75,8 +75,6 @@ struct vo_x11_state {
     struct mp_rect winrc;
     double current_display_fps;
 
-    int pending_vo_events;
-
     // last non-fullscreen extends (updated on fullscreen or reinitialization)
     struct mp_rect nofsrc;
 
@@ -108,18 +106,19 @@ struct vo_x11_state {
 
     /* dragging the window */
     bool win_drag_button1_down;
+
+    char *window_title;
+
+    // The visual the window should be created with.
+    XVisualInfo *window_visual;
 };
 
-int vo_x11_init(struct vo *vo);
-void vo_x11_uninit(struct vo *vo);
-int vo_x11_check_events(struct vo *vo);
-bool vo_x11_screen_is_composited(struct vo *vo);
-void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis, int flags,
-                             const char *classname);
-void vo_x11_clear_background(struct vo *vo, const struct mp_rect *rc);
-void vo_x11_clearwindow(struct vo *vo, Window vo_window);
-int vo_x11_control(struct vo *vo, int *events, int request, void *arg);
+extern const struct vo_win_driver win_driver_x11;
 
-double vo_x11_vm_get_fps(struct vo *vo);
+bool vo_x11_screen_is_composited(struct vo_win *win);
+void vo_x11_clear_background(struct vo_win *win, const struct mp_rect *rc);
+void vo_x11_clearwindow(struct vo_win *win, Window vo_window);
+
+Window vo_x11_create_gl_window(struct vo_win *win, XVisualInfo *vis, int flags);
 
 #endif /* MPLAYER_X11_COMMON_H */
