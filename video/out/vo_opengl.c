@@ -30,8 +30,6 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include <libavutil/common.h>
-
 #include "config.h"
 
 #include "talloc.h"
@@ -40,6 +38,7 @@
 #include "common/msg.h"
 #include "options/m_config.h"
 #include "vo.h"
+#include "win.h"
 #include "video/vfcap.h"
 #include "video/mp_image.h"
 #include "sub/osd.h"
@@ -54,7 +53,7 @@
 
 struct gl_priv {
     struct vo *vo;
-    MPGLContext *glctx;
+    struct vo_win *win;
     GL *gl;
 
     struct gl_video *renderer;
@@ -121,9 +120,9 @@ static void flip_page(struct vo *vo)
     struct gl_priv *p = vo->priv;
     GL *gl = p->gl;
 
-    mpgl_lock(p->glctx);
+    mpgl_lock(p->win);
 
-    p->glctx->swapGlBuffers(p->glctx);
+    p->win->driver->gl->swap_buffers(p->win);
 
     p->frames_rendered++;
     if (p->frames_rendered > 5)
@@ -150,7 +149,7 @@ static void flip_page(struct vo *vo)
         }
     }
 
-    mpgl_unlock(p->glctx);
+    mpgl_unlock(p->win);
 }
 
 static void draw_image(struct vo *vo, mp_image_t *mpi)
@@ -161,7 +160,7 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     if (p->vo_flipped)
         mp_image_vflip(mpi);
 
-    mpgl_lock(p->glctx);
+    mpgl_lock(p->win);
 
     gl_video_upload_image(p->renderer, mpi);
     gl_video_render_frame(p->renderer);
@@ -174,7 +173,7 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     if (p->use_glFinish)
         gl->Finish();
 
-    mpgl_unlock(p->glctx);
+    mpgl_unlock(p->win);
 }
 
 static int query_format(struct vo *vo, uint32_t format)
@@ -186,43 +185,26 @@ static int query_format(struct vo *vo, uint32_t format)
     return caps;
 }
 
-static bool config_window(struct gl_priv *p, int flags)
+static void resize_callback(void *ctx, int w, int h)
 {
-    if (p->renderer_opts->stereo_mode == GL_3D_QUADBUFFER)
-        flags |= VOFLAG_STEREO;
-
-    if (p->renderer_opts->alpha_mode == 1)
-        flags |= VOFLAG_ALPHA;
-
-    if (p->use_gl_debug)
-        flags |= VOFLAG_GL_DEBUG;
-
-    int mpgl_caps = MPGL_CAP_GL21 | MPGL_CAP_TEX_RG;
-    if (!p->allow_sw)
-        mpgl_caps |= MPGL_CAP_NO_SW;
-    return mpgl_config_window(p->glctx, mpgl_caps, flags);
-}
-
-static void video_resize_redraw_callback(struct vo *vo, int w, int h)
-{
+    struct vo *vo = ctx;
     struct gl_priv *p = vo->priv;
     gl_video_resize_redraw(p->renderer, w, h);
-
 }
 
 static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
 {
     struct gl_priv *p = vo->priv;
 
-    mpgl_lock(p->glctx);
+    mpgl_lock(p->win);
 
-    if (!config_window(p, flags)) {
-        mpgl_unlock(p->glctx);
+    if (vo_win_reconfig_vo(p->win, vo, flags) < 0) {
+        mpgl_unlock(p->win);
         return -1;
     }
 
-    if (p->glctx->register_resize_callback) {
-        p->glctx->register_resize_callback(vo, video_resize_redraw_callback);
+    if (p->win->driver->gl->register_resize_callback) {
+        p->win->driver->gl->register_resize_callback(p->win, resize_callback, vo);
     }
 
     gl_video_config(p->renderer, params);
@@ -231,7 +213,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
 
     resize(p);
 
-    mpgl_unlock(p->glctx);
+    mpgl_unlock(p->win);
 
     return 0;
 }
@@ -244,20 +226,21 @@ static void load_hwdec_driver(struct gl_priv *p,
     *hwdec = (struct gl_hwdec) {
         .driver = drv,
         .log = mp_log_new(hwdec, p->vo->log, drv->api_name),
-        .mpgl = p->glctx,
+        .mpgl = mpgl_get_legacy_context(p->win),
+        .win = p->win,
         .info = &p->hwdec_info,
         .gl_texture_target = GL_TEXTURE_2D,
     };
-    mpgl_lock(p->glctx);
+    mpgl_lock(p->win);
     if (hwdec->driver->create(hwdec) < 0) {
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         talloc_free(hwdec);
         MP_ERR(p->vo, "Couldn't load hwdec driver '%s'\n", drv->api_name);
         return;
     }
     p->hwdec = hwdec;
     gl_video_set_hwdec(p->renderer, p->hwdec);
-    mpgl_unlock(p->glctx);
+    mpgl_unlock(p->win);
 }
 
 static void request_hwdec_api(struct gl_priv *p, const char *api_name)
@@ -288,12 +271,12 @@ static void call_request_hwdec_api(struct mp_hwdec_info *info,
 static void unload_hwdec_driver(struct gl_priv *p)
 {
     if (p->hwdec) {
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         gl_video_set_hwdec(p->renderer, NULL);
         p->hwdec->driver->destroy(p->hwdec);
         talloc_free(p->hwdec);
         p->hwdec = NULL;
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
     }
 }
 
@@ -319,7 +302,7 @@ static bool get_and_update_icc_profile(struct vo *vo,
         return update_icc_profile(p, opts);
 
     char *icc = NULL;
-    int r = p->glctx->vo_control(vo, NULL, VOCTRL_GET_ICC_PROFILE_PATH, &icc);
+    int r = vo_win_control(p->win, VOCTRL_GET_ICC_PROFILE_PATH, &icc);
     if (r != VO_TRUE)
         return false;
 
@@ -354,11 +337,11 @@ static bool reparse_cmdline(struct gl_priv *p, char *args)
     }
 
     if (r >= 0) {
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         gl_video_set_options(p->renderer, opts->renderer_opts);
         update_icc_profile(p, opts->icc_opts);
         resize(p);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
     }
 
     talloc_free(cfg);
@@ -373,40 +356,40 @@ static int control(struct vo *vo, uint32_t request, void *data)
     case VOCTRL_GET_PANSCAN:
         return VO_TRUE;
     case VOCTRL_SET_PANSCAN:
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         resize(p);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         return VO_TRUE;
     case VOCTRL_GET_EQUALIZER: {
         struct voctrl_get_equalizer_args *args = data;
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         bool r = gl_video_get_equalizer(p->renderer, args->name,
                                         args->valueptr);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         return r ? VO_TRUE : VO_NOTIMPL;
     }
     case VOCTRL_SET_EQUALIZER: {
         struct voctrl_set_equalizer_args *args = data;
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         bool r = gl_video_set_equalizer(p->renderer, args->name, args->value);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         if (r)
             vo->want_redraw = true;
         return r ? VO_TRUE : VO_NOTIMPL;
     }
     case VOCTRL_GET_COLORSPACE:
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         gl_video_get_colorspace(p->renderer, data);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         return VO_TRUE;
     case VOCTRL_SCREENSHOT: {
         struct voctrl_screenshot_args *args = data;
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         if (args->full_window)
             args->out_image = glGetWindowScreenshot(p->gl);
         else
             args->out_image = gl_video_download_image(p->renderer);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         return true;
     }
     case VOCTRL_GET_HWDEC_INFO: {
@@ -418,9 +401,9 @@ static int control(struct vo *vo, uint32_t request, void *data)
         request_hwdec_api(p, data);
         return true;
     case VOCTRL_REDRAW_FRAME:
-        mpgl_lock(p->glctx);
+        mpgl_lock(p->win);
         gl_video_render_frame(p->renderer);
-        mpgl_unlock(p->glctx);
+        mpgl_unlock(p->win);
         return true;
     case VOCTRL_SET_COMMAND_LINE: {
         char *arg = data;
@@ -428,9 +411,21 @@ static int control(struct vo *vo, uint32_t request, void *data)
     }
     }
 
-    mpgl_lock(p->glctx);
-    int events = 0;
-    int r = p->glctx->vo_control(vo, &events, request, data);
+    return vo_win_control(p->win, request, data);
+}
+
+static void wakeup(struct vo *vo)
+{
+    struct gl_priv *p = vo->priv;
+    vo_win_wakeup(p->win);
+}
+
+static int wait_events(struct vo *vo, int64_t until_time_us)
+{
+    struct gl_priv *p = vo->priv;
+
+    int events = vo_win_wait_events(p->win, until_time_us);
+    mpgl_lock(p->win);
     if (events & VO_EVENT_RESIZE)
         resize(p);
     if (events & VO_EVENT_EXPOSE)
@@ -439,20 +434,20 @@ static int control(struct vo *vo, uint32_t request, void *data)
         get_and_update_icc_profile(vo, p->icc_opts);
         vo->want_redraw = true;
     }
-    mpgl_unlock(p->glctx);
+    mpgl_unlock(p->win);
 
-    return r;
+    return events;
 }
 
 static void uninit(struct vo *vo)
 {
     struct gl_priv *p = vo->priv;
 
-    if (p->glctx) {
+    if (p->win) {
         unload_hwdec_driver(p);
         if (p->renderer)
             gl_video_uninit(p->renderer);
-        mpgl_uninit(p->glctx);
+        vo_win_destroy(p->win);
     }
 }
 
@@ -461,27 +456,41 @@ static int preinit(struct vo *vo)
     struct gl_priv *p = vo->priv;
     p->vo = vo;
 
-    p->glctx = mpgl_init(vo, p->backend);
-    if (!p->glctx)
-        goto err_out;
-    p->gl = p->glctx->gl;
+    int flags = 0;
 
-    if (!config_window(p, VOFLAG_HIDDEN))
-        goto err_out;
+    if (p->renderer_opts->stereo_mode == GL_3D_QUADBUFFER)
+        flags |= VOFLAG_STEREO;
 
-    mpgl_set_context(p->glctx);
+    if (p->renderer_opts->alpha_mode == 1)
+        flags |= VOFLAG_ALPHA;
+
+    if (p->use_gl_debug)
+        flags |= VOFLAG_GL_DEBUG;
+
+    int mpgl_caps = MPGL_CAP_GL21 | MPGL_CAP_TEX_RG;
+    if (!p->allow_sw)
+        mpgl_caps |= MPGL_CAP_NO_SW;
+
+    p->win = mpgl_create_win(vo, p->backend, mpgl_caps, flags);
+    if (!p->win)
+        goto err_out;
+    p->gl = mpgl_get_gl(p->win);
+
+    mpgl_lock(p->win);
 
     if (p->gl->SwapInterval)
         p->gl->SwapInterval(p->swap_interval);
 
     p->renderer = gl_video_init(p->gl, vo->log, vo->osd);
-    gl_video_set_output_depth(p->renderer, p->glctx->depth_r, p->glctx->depth_g,
-                              p->glctx->depth_b);
+
+    int depth[3];
+    vo_win_control(p->win, VOCTRL_GET_BIT_DEPTH, depth);
+    gl_video_set_output_depth(p->renderer, depth[0], depth[1], depth[2]);
     gl_video_set_options(p->renderer, p->renderer_opts);
     if (!get_and_update_icc_profile(vo, p->icc_opts))
         goto err_out;
 
-    mpgl_unset_context(p->glctx);
+    mpgl_unlock(p->win);
 
     p->hwdec_info.load_api = call_request_hwdec_api;
     p->hwdec_info.load_api_ctx = vo;
@@ -520,6 +529,8 @@ const struct vo_driver video_out_opengl = {
     .control = control,
     .draw_image = draw_image,
     .flip_page = flip_page,
+    .wait_events = wait_events,
+    .wakeup = wakeup,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
     .options = options,
@@ -535,6 +546,8 @@ const struct vo_driver video_out_opengl_hq = {
     .control = control,
     .draw_image = draw_image,
     .flip_page = flip_page,
+    .wait_events = wait_events,
+    .wakeup = wakeup,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
     .priv_defaults = &(const struct gl_priv){
