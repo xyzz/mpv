@@ -39,97 +39,23 @@
 
 #include "core.h"
 
-#if HAVE_LIBASS
-
-static const char *const font_mimetypes[] = {
-    "application/x-truetype-font",
-    "application/vnd.ms-opentype",
-    "application/x-font-ttf",
-    "application/x-font", // probably incorrect
-    NULL
-};
-
-static const char *const font_exts[] = {".ttf", ".ttc", ".otf", NULL};
-
-static bool attachment_is_font(struct mp_log *log, struct demux_attachment *att)
+static void add_attachments_from_sources(struct MPContext *mpctx,
+                                         struct dec_sub *sd)
 {
-    if (!att->name || !att->type || !att->data || !att->data_size)
-        return false;
-    for (int n = 0; font_mimetypes[n]; n++) {
-        if (strcmp(font_mimetypes[n], att->type) == 0)
-            return true;
-    }
-    // fallback: match against file extension
-    char *ext = strlen(att->name) > 4 ? att->name + strlen(att->name) - 4 : "";
-    for (int n = 0; font_exts[n]; n++) {
-        if (strcasecmp(ext, font_exts[n]) == 0) {
-            mp_warn(log, "Loading font attachment '%s' with MIME type %s. "
-                    "Assuming this is a broken Matroska file, which was "
-                    "muxed without setting a correct font MIME type.\n",
-                    att->name, att->type);
-            return true;
-        }
-    }
-    return false;
-}
-
-static void add_subtitle_fonts_from_sources(struct MPContext *mpctx)
-{
-    if (mpctx->opts->ass_enabled) {
+    if (mpctx->opts->ass_enabled && mpctx->opts->use_embedded_fonts) {
+        struct demux_attachment *a = NULL;
+        int num = 0;
         for (int j = 0; j < mpctx->num_sources; j++) {
             struct demuxer *d = mpctx->sources[j];
-            for (int i = 0; i < d->num_attachments; i++) {
-                struct demux_attachment *att = d->attachments + i;
-                if (mpctx->opts->use_embedded_fonts &&
-                    attachment_is_font(mpctx->log, att))
-                {
-                    ass_add_font(mpctx->ass_library, att->name, att->data,
-                                 att->data_size);
-                }
-            }
+            for (int i = 0; i < d->num_attachments; i++)
+                MP_TARRAY_APPEND(NULL, a, num, d->attachments[i]);
         }
+        // Warning: we assume the attachment data stays alive until the
+        //          decoder is destroyed, which is not true (reloading or
+        //          removing external subs destroys some)
+        sub_set_attachments(sd, a, num);
     }
 }
-
-static void init_sub_renderer(struct MPContext *mpctx)
-{
-    struct MPOpts *opts = mpctx->opts;
-
-    if (mpctx->ass_renderer)
-        return;
-
-    if (!mpctx->ass_log)
-        mpctx->ass_log = mp_log_new(mpctx, mpctx->global->log, "!libass");
-
-    mpctx->ass_library = mp_ass_init(mpctx->global, mpctx->ass_log);
-
-    add_subtitle_fonts_from_sources(mpctx);
-
-    if (opts->ass_style_override)
-        ass_set_style_overrides(mpctx->ass_library, opts->ass_force_style_list);
-
-    mpctx->ass_renderer = ass_renderer_init(mpctx->ass_library);
-}
-
-void uninit_sub_renderer(struct MPContext *mpctx)
-{
-    if (mpctx->ass_renderer)
-        ass_renderer_done(mpctx->ass_renderer);
-    mpctx->ass_renderer = NULL;
-    if (mpctx->ass_library)
-        ass_library_done(mpctx->ass_library);
-    mpctx->ass_library = NULL;
-}
-
-#else /* HAVE_LIBASS */
-
-static void init_sub_renderer(struct MPContext *mpctx) {}
-void uninit_sub_renderer(struct MPContext *mpctx) {}
-
-static void mp_ass_configure_fonts(struct ass_renderer *a, struct osd_style_opts *b,
-                                   struct mpv_global *c, struct mp_log *d) {}
-
-#endif
 
 static void reset_subtitles(struct MPContext *mpctx, int order)
 {
@@ -302,17 +228,10 @@ static void reinit_subdec(struct MPContext *mpctx, struct track *track,
     int h = sh_video ? sh_video->disp_h : 0;
     float fps = sh_video ? sh_video->fps : 25;
 
-    init_sub_renderer(mpctx);
-
     sub_set_video_res(dec_sub, w, h);
     sub_set_video_fps(dec_sub, fps);
-    sub_set_ass_renderer(dec_sub, mpctx->ass_library, mpctx->ass_renderer);
+    add_attachments_from_sources(mpctx, dec_sub);
     sub_init_from_sh(dec_sub, track->stream);
-
-    if (mpctx->ass_renderer) {
-        mp_ass_configure_fonts(mpctx->ass_renderer, opts->sub_text_style,
-                               mpctx->global, mpctx->ass_log);
-    }
 
     // Don't do this if the file has video/audio streams. Don't do it even
     // if it has only sub streams, because reading packets will change the

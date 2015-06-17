@@ -28,6 +28,7 @@
 #include "options/options.h"
 #include "common/common.h"
 #include "common/msg.h"
+#include "demux/demux.h"
 #include "video/csputils.h"
 #include "video/mp_image.h"
 #include "dec_sub.h"
@@ -35,6 +36,8 @@
 #include "sd.h"
 
 struct sd_ass_priv {
+    ASS_Library *ass_library;
+    ASS_Renderer *ass_renderer;
     struct ass_track *ass_track;
     bool is_converted;
     struct sub_bitmap *parts;
@@ -56,18 +59,71 @@ static bool supports_format(const char *format)
                       strcmp(format, "ass-text") == 0);
 }
 
+static const char *const font_mimetypes[] = {
+    "application/x-truetype-font",
+    "application/vnd.ms-opentype",
+    "application/x-font-ttf",
+    "application/x-font", // probably incorrect
+    NULL
+};
+
+static const char *const font_exts[] = {".ttf", ".ttc", ".otf", NULL};
+
+static bool attachment_is_font(struct mp_log *log, struct demux_attachment *att)
+{
+    if (!att->name || !att->type || !att->data || !att->data_size)
+        return false;
+    for (int n = 0; font_mimetypes[n]; n++) {
+        if (strcmp(font_mimetypes[n], att->type) == 0)
+            return true;
+    }
+    // fallback: match against file extension
+    char *ext = strlen(att->name) > 4 ? att->name + strlen(att->name) - 4 : "";
+    for (int n = 0; font_exts[n]; n++) {
+        if (strcasecmp(ext, font_exts[n]) == 0) {
+            mp_warn(log, "Loading font attachment '%s' with MIME type %s. "
+                    "Assuming this is a broken Matroska file, which was "
+                    "muxed without setting a correct font MIME type.\n",
+                    att->name, att->type);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void add_fonts(struct sd *sd)
+{
+    struct sd_ass_priv *ctx = sd->priv;
+    for (int n = 0; n < sd->num_attachments; n++) {
+        struct demux_attachment *a = &sd->attachments[n];
+        if (attachment_is_font(sd->log, a))
+            ass_add_font(ctx->ass_library, a->name, a->data, a->data_size);
+    }
+}
+
 static int init(struct sd *sd)
 {
     struct MPOpts *opts = sd->opts;
-    if (!sd->ass_library || !sd->ass_renderer || !sd->codec)
-        return -1;
-
     struct sd_ass_priv *ctx = talloc_zero(NULL, struct sd_ass_priv);
     sd->priv = ctx;
 
+    ctx->ass_library = mp_ass_init(sd->global, sd->log);
+
+    if (opts->ass_style_override)
+        ass_set_style_overrides(ctx->ass_library, opts->ass_force_style_list);
+
+    add_fonts(sd);
+
+    ctx->ass_renderer = ass_renderer_init(ctx->ass_library);
+    if (!ctx->ass_renderer)
+        abort();
+
+    mp_ass_configure_fonts(ctx->ass_renderer, opts->sub_text_style,
+                           sd->global, sd->log);
+
     ctx->is_converted = sd->converted_from != NULL;
 
-    ctx->ass_track = ass_new_track(sd->ass_library);
+    ctx->ass_track = ass_new_track(ctx->ass_library);
     if (!ctx->is_converted)
         ctx->ass_track->track_type = TRACK_TYPE_ASS;
 
@@ -127,7 +183,7 @@ static void configure_ass(struct sd *sd, struct mp_osd_res *dim)
 {
     struct sd_ass_priv *ctx = sd->priv;
     struct MPOpts *opts = sd->opts;
-    ASS_Renderer *priv = sd->ass_renderer;
+    ASS_Renderer *priv = ctx->ass_renderer;
     ASS_Track *track = ctx->ass_track;
 
     ass_set_frame_size(priv, dim->w, dim->h);
@@ -194,10 +250,10 @@ static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, double pts,
     struct sd_ass_priv *ctx = sd->priv;
     struct MPOpts *opts = sd->opts;
 
-    if (pts == MP_NOPTS_VALUE || !sd->ass_renderer)
+    if (pts == MP_NOPTS_VALUE)
         return;
 
-    ASS_Renderer *renderer = sd->ass_renderer;
+    ASS_Renderer *renderer = ctx->ass_renderer;
     double scale = dim.display_par;
     if (!ctx->is_converted && (!opts->ass_style_override ||
                                opts->ass_vsfilter_aspect_compat))
@@ -350,7 +406,10 @@ static void uninit(struct sd *sd)
 {
     struct sd_ass_priv *ctx = sd->priv;
 
+    ass_renderer_done(ctx->ass_renderer);
     ass_free_track(ctx->ass_track);
+    ass_library_done(ctx->ass_library);
+
     talloc_free(ctx);
 }
 

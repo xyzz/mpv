@@ -60,6 +60,7 @@ struct dec_sub {
 
     struct mp_log *log;
     struct MPOpts *opts;
+    struct mpv_global *global;
     struct sd init_sd;
 
     double video_fps;
@@ -93,6 +94,7 @@ struct dec_sub *sub_create(struct mpv_global *global)
     struct dec_sub *sub = talloc_zero(NULL, struct dec_sub);
     sub->log = mp_log_new(sub, global->log, "sub");
     sub->opts = global->opts;
+    sub->global = global;
 
     mpthread_mutex_init_recursive(&sub->lock);
 
@@ -115,6 +117,7 @@ void sub_destroy(struct dec_sub *sub)
     if (!sub)
         return;
     sub_uninit(sub);
+    talloc_free(sub->init_sd.attachments);
     pthread_mutex_destroy(&sub->lock);
     talloc_free(sub);
 }
@@ -155,12 +158,14 @@ void sub_set_extradata(struct dec_sub *sub, void *data, int data_len)
     pthread_mutex_unlock(&sub->lock);
 }
 
-void sub_set_ass_renderer(struct dec_sub *sub, struct ass_library *ass_library,
-                          struct ass_renderer *ass_renderer)
+// dec_sub takes ownership of the attachments, and will free them with
+// talloc_free(a).
+void sub_set_attachments(struct dec_sub *sub, struct demux_attachment *a, int num)
 {
     pthread_mutex_lock(&sub->lock);
-    sub->init_sd.ass_library = ass_library;
-    sub->init_sd.ass_renderer = ass_renderer;
+    talloc_free(sub->init_sd.attachments);
+    sub->init_sd.attachments = a;
+    sub->init_sd.num_attachments = num;
     pthread_mutex_unlock(&sub->lock);
 }
 
@@ -211,6 +216,7 @@ void sub_init_from_sh(struct dec_sub *sub, struct sh_stream *sh)
         struct sd *sd = talloc(NULL, struct sd);
         *sd = init_sd;
         sd->opts = sub->opts;
+        sd->global = sub->global;
         if (sub_init_decoder(sub, sd) < 0) {
             talloc_free(sd);
             break;
@@ -228,8 +234,8 @@ void sub_init_from_sh(struct dec_sub *sub, struct sh_stream *sh)
             .converted_from = sd->codec,
             .extradata = sd->output_extradata,
             .extradata_len = sd->output_extradata_len,
-            .ass_library = sub->init_sd.ass_library,
-            .ass_renderer = sub->init_sd.ass_renderer,
+            .attachments = sd->attachments,
+            .num_attachments = sd->num_attachments,
         };
     }
 

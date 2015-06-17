@@ -7,6 +7,7 @@
 struct sd {
     struct mp_log *log;
     struct MPOpts *opts;
+    struct mpv_global *global;
 
     const struct sd_functions *driver;
     void *priv;
@@ -17,6 +18,10 @@ struct sd {
     char *extradata;
     int extradata_len;
 
+    // Used for attached fonts with ASS subs.
+    struct demux_attachment *attachments;
+    int num_attachments;
+
     // Set to !=NULL if the input packets are being converted from another
     // format.
     const char *converted_from;
@@ -24,10 +29,6 @@ struct sd {
     // Video resolution used for subtitle decoding. Doesn't necessarily match
     // the resolution of the VO, nor does it have to be the OSD resolution.
     int sub_video_w, sub_video_h;
-
-    // Shared renderer for ASS - done to avoid reloading embedded fonts.
-    struct ass_library *ass_library;
-    struct ass_renderer *ass_renderer;
 
     // If false, try to remove multiple subtitles.
     // (Only for decoders which have accept_packets_in_advance set.)
