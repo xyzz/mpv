@@ -50,6 +50,7 @@
 #include "common/msg.h"
 
 static int vo_cocoa_fullscreen(struct vo *vo);
+static void vo_cocoa_fullscreen_reconfig(struct vo *vo);
 static void cocoa_rm_fs_screen_profile_observer(struct vo_cocoa_state *s);
 
 struct vo_cocoa_state {
@@ -587,7 +588,7 @@ int vo_cocoa_config_window(struct vo *vo)
         if (!s->embedded && s->window) {
             if (reset_size)
                 queue_new_video_size(vo, width, height);
-            vo_cocoa_fullscreen(vo);
+            vo_cocoa_fullscreen_reconfig(vo);
             cocoa_add_fs_screen_profile_observer(vo);
             cocoa_set_window_title(vo);
             vo_set_level(vo, vo->opts->ontop);
@@ -712,20 +713,39 @@ static int vo_cocoa_fullscreen(struct vo *vo)
 
     vo_cocoa_update_screen_info(vo, NULL);
 
-    draw_changes_after_next_frame(vo);
-    [(MpvEventsView *)s->view setFullScreen:opts->fullscreen];
+    // draw_changes_after_next_frame(vo);
 
-    if ([s->view window] != s->window) {
-        // cocoa implements fullscreen views by moving the view to a fullscreen
-        // window. Set that window delegate to the cocoa adapter to trigger
-        // calls to -windowDidResignKey: and -windowDidBecomeKey:
-        [[s->view window] setDelegate:s->adapter];
+    // [(MpvEventsView *)s->view setFullScreen:opts->fullscreen];
+
+    // if ([s->view window] != s->window) {
+    //     // cocoa implements fullscreen views by moving the view to a fullscreen
+    //     // window. Set that window delegate to the cocoa adapter to trigger
+    //     // calls to -windowDidResignKey: and -windowDidBecomeKey:
+    //     [[s->view window] setDelegate:s->adapter];
+    // }
+    BOOL result = [(MpvVideoWindow *)s->window setFullscreen:!opts->fullscreen];
+
+    return result ? VO_TRUE : VO_FALSE;
+}
+
+static void vo_cocoa_fullscreen_reconfig(struct vo *vo)
+{
+    struct mp_vo_opts *opts = vo->opts;
+    opts->fullscreen = !opts->fullscreen;
+    if (!vo_cocoa_fullscreen(vo)) {
+        // reset state on failure, because the done callback will not take place
+        opts->fullscreen = !opts->fullscreen;
     }
+}
 
+// called after cocoa is done playing the fs transition
+static void vo_cocoa_fullscreen_done(struct vo *vo)
+{
+    struct mp_vo_opts *opts  = vo->opts;
+    opts->fullscreen = !opts->fullscreen;
+    NSLog(@"vo_cocoa_fullscreen_done %d\n", opts->fullscreen);
     flag_events(vo, VO_EVENT_ICC_PROFILE_CHANGED);
     resize_event(vo);
-
-    return VO_TRUE;
 }
 
 static void vo_cocoa_control_get_icc_profile(struct vo *vo, void *arg)
@@ -744,11 +764,8 @@ static void vo_cocoa_control_get_icc_profile(struct vo *vo, void *arg)
 
 static int vo_cocoa_control_on_main_thread(struct vo *vo, int request, void *arg)
 {
-    struct mp_vo_opts *opts  = vo->opts;
-
     switch (request) {
     case VOCTRL_FULLSCREEN:
-        opts->fullscreen = !opts->fullscreen;
         return vo_cocoa_fullscreen(vo);
     case VOCTRL_ONTOP:
         return vo_cocoa_ontop(vo);
@@ -913,6 +930,11 @@ int vo_cocoa_control(struct vo *vo, int *events, int request, void *arg)
 {
     struct vo_cocoa_state *s = self.vout->cocoa;
     [(MpvEventsView *)s->view signalMousePosition];
+}
+
+- (void)didEndFullscreenAnimation
+{
+    vo_cocoa_fullscreen_done(self.vout);
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification

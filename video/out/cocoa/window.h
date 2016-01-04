@@ -22,7 +22,12 @@
 - (void)queueNewVideoSize:(NSSize)newSize;
 @end
 
-@interface MpvVideoWindow : NSWindow <NSWindowDelegate, MpvSizing>
+@protocol MpvFullScreen
+- (BOOL)setFullscreen:(BOOL)willBeFullscreen;
+- (BOOL)isInFullScreenMode;
+@end
+
+@interface MpvVideoWindow : NSWindow <NSWindowDelegate, MpvSizing, MpvFullScreen>
 @property(nonatomic, retain) MpvCocoaAdapter *adapter;
 - (BOOL)canBecomeKeyWindow;
 - (BOOL)canBecomeMainWindow;

@@ -29,6 +29,7 @@
 - (void)didChangeWindowedScreenProfile:(NSScreen *)screen;
 - (void)performAsyncResize:(NSSize)size;
 - (void)didChangeMousePosition;
+- (void)didEndFullscreenAnimation;
 
 - (BOOL)isInFullScreenMode;
 - (BOOL)keyboardEnabled;

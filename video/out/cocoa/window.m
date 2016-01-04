@@ -50,6 +50,42 @@
     return self;
 }
 
+- (BOOL)setFullscreen:(BOOL)willBeFullscreen {
+    NSLog(@"setFullscreen %d - %d \n", willBeFullscreen, [self isInFullScreenMode]);
+    BOOL result = willBeFullscreen != [self isInFullScreenMode];
+    if (result) {
+        NSLog(@"toggleFullScreen ");
+        [self setCollectionBehavior:(NSWindowCollectionBehaviorFullScreenPrimary)];
+        [self toggleFullScreen:nil];
+    }
+    return result;
+}
+
+- (BOOL)isInFullScreenMode
+{
+    return (([self styleMask] & NSFullScreenWindowMask) == NSFullScreenWindowMask);
+}
+
+- (NSSize)window:(NSWindow *)window willUseFullScreenContentSize:(NSSize)size {
+    return window.screen.frame.size;
+}
+
+- (NSApplicationPresentationOptions)window:(NSWindow *)window
+      willUseFullScreenPresentationOptions:(NSApplicationPresentationOptions)opts {
+    return NSApplicationPresentationFullScreen      |
+           NSApplicationPresentationAutoHideDock    |
+           NSApplicationPresentationAutoHideMenuBar |
+           NSApplicationPresentationAutoHideToolbar;
+}
+
+- (void)windowDidExitFullScreen:(NSNotification *)notification {
+    [self.adapter didEndFullscreenAnimation];
+}
+
+- (void)windowDidEnterFullScreen:(NSNotification *)notification {
+    [self.adapter didEndFullscreenAnimation];
+}
+
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification
 {
     // XXX: we maybe only need expose for this
