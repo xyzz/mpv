@@ -387,7 +387,7 @@ static void check_estimated_display_fps(struct vo *vo)
 static void vsync_skip_detection(struct vo *vo)
 {
     struct vo_internal *in = vo->in;
-
+/*
     int window = 4;
     int64_t t_r = in->prev_vsync, t_e = in->base_vsync, diff = 0, desync_early = 0;
     for (int n = 0; n < in->drop_point; n++) {
@@ -411,6 +411,7 @@ static void vsync_skip_detection(struct vo *vo)
     }
     if (in->drop_point > 10)
         in->base_vsync += desync / 10;  // smooth out drift
+    */
 }
 
 // Always called locked.
