@@ -236,6 +236,13 @@ static int decode_packet(struct dec_audio *da, struct mp_audio **out)
 
     mpframe->pts = out_pts;
 
+    double fs = mpframe->samples / (double)mpframe->rate;
+    static double cur_fs;
+    if (cur_fs != fs) {
+        cur_fs = fs;
+        MP_WARN(da, "frame size: %f\n", cur_fs);
+    }
+
 #if HAVE_AVFRAME_SKIP_SAMPLES
     AVFrameSideData *sd =
         av_frame_get_side_data(priv->avframe, AV_FRAME_DATA_SKIP_SAMPLES);
