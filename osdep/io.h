@@ -32,6 +32,10 @@
 #include <glob.h>
 #endif
 
+#ifdef __ANDROID__
+#include "osdep/android/glob.h"
+#endif
+
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
