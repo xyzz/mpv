@@ -30,6 +30,7 @@ struct subprocess_args {
 
 static void *run_subprocess(void *ptr)
 {
+#ifndef __ANDROID__
     struct subprocess_args *p = ptr;
     pthread_detach(pthread_self());
 
@@ -40,6 +41,7 @@ static void *run_subprocess(void *ptr)
         mp_err(p->log, "Running subprocess failed: %s\n", err);
 
     talloc_free(p);
+#endif
     return NULL;
 }
 
