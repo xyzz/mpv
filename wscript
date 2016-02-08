@@ -763,9 +763,14 @@ video_output_features = [
             check_statement('GL/gl.h', '(void)GL_LUMINANCE16') # arbitrary OpenGL legacy-only symbol
         ),
     } , {
+        'name': '--android',
+        'desc': 'Android support',
+        'default': 'disable',
+        'func': check_true
+    } , {
         'name': '--gl',
         'desc': 'OpenGL video outputs',
-        'deps_any': [ 'gl-cocoa', 'gl-x11', 'egl-x11', 'egl-drm', 'gl-win32', 'gl-wayland', 'rpi' ],
+        'deps_any': [ 'gl-cocoa', 'gl-x11', 'egl-x11', 'egl-drm', 'gl-win32', 'gl-wayland', 'rpi', 'android' ],
         'func': check_true
     }, {
         'name': 'egl-helpers',
