@@ -95,7 +95,12 @@ static bool strndup_append_at(char **str, size_t at, const char *append,
     if (!*str && !append)
         return true; // stays NULL, but not an OOM condition
 
+#ifdef __ANDROID__
+    // strnlen is broken on current android ndk, see https://code.google.com/p/android/issues/detail?id=74741
+    size_t real_len = append ? strlen(append) : 0;
+#else
     size_t real_len = append ? strnlen(append, append_len) : 0;
+#endif
     if (append_len > real_len)
         append_len = real_len;
 
