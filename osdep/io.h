@@ -34,6 +34,15 @@
 
 #ifdef __ANDROID__
 #include "osdep/android/glob.h"
+
+#include <android/log.h>
+#include <stdio.h>
+
+#define LOG_TAG "mpv"
+
+#define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define printf(...) ALOGE(__VA_ARGS__)
+#define fprintf(stream, ...) ALOGE(__VA_ARGS__)
 #endif
 
 #ifndef O_BINARY
